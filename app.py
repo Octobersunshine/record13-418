@@ -219,9 +219,31 @@ def _simple_beeswarm(values, width=None):
     return x_offsets
 
 
+def _hex_to_rgba(hex_color, alpha):
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16) / 255.0
+    g = int(hex_color[2:4], 16) / 255.0
+    b = int(hex_color[4:6], 16) / 255.0
+    return (r, g, b, alpha)
+
+
+def _darken_color(color, factor=0.6):
+    if isinstance(color, str) and color.startswith("#"):
+        rgba = _hex_to_rgba(color, 1.0)
+    else:
+        rgba = color if len(color) == 4 else (*color, 1.0)
+    return (
+        min(max(rgba[0] * factor, 0), 1),
+        min(max(rgba[1] * factor, 0), 1),
+        min(max(rgba[2] * factor, 0), 1),
+        rgba[3]
+    )
+
+
 def generate_beeswarm(categories, values, title="Beeswarm Plot",
                        xlabel="Category", ylabel="Value",
-                       palette=None, figsize=None, dpi=120):
+                       palette=None, figsize=None, dpi=120,
+                       show_boxplot=False):
     df = pd.DataFrame({"category": categories, "value": values})
     groups = df.groupby("category", sort=True)
 
@@ -247,6 +269,37 @@ def generate_beeswarm(categories, values, title="Beeswarm Plot",
         palette = [cmap(i / max(n_cats, 1)) for i in range(n_cats)]
 
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    if show_boxplot and n_cats > 0:
+        data_by_cat = [groups.get_group(cat)["value"].values for cat in cat_labels]
+        box_width = 0.35
+
+        bp = ax.boxplot(
+            data_by_cat,
+            positions=range(n_cats),
+            widths=box_width,
+            patch_artist=True,
+            showfliers=False,
+            zorder=2,
+            medianprops={"linewidth": 2, "zorder": 4},
+            whiskerprops={"linewidth": 1.5},
+            capprops={"linewidth": 1.5},
+            boxprops={"linewidth": 1.5}
+        )
+
+        for i, patch in enumerate(bp["boxes"]):
+            color = palette[i % len(palette)]
+            patch.set_facecolor((*color[:3], 0.22))
+            patch.set_edgecolor(_darken_color(color, 0.55))
+
+        for elem_name in ["whiskers", "caps"]:
+            for i, line in enumerate(bp[elem_name]):
+                color = palette[(i // 2) % len(palette)]
+                line.set_color(_darken_color(color, 0.55))
+
+        for i, line in enumerate(bp["medians"]):
+            color = palette[i % len(palette)]
+            line.set_color(_darken_color(color, 0.35))
 
     for i, cat in enumerate(cat_labels):
         grp = groups.get_group(cat)
@@ -282,6 +335,16 @@ def index():
     return render_template("index.html")
 
 
+def _parse_bool(val, default=False):
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    if isinstance(val, str):
+        return val.lower() in ("1", "true", "yes", "on")
+    return default
+
+
 @app.route("/api/plot", methods=["POST"])
 def plot():
     data = request.get_json(force=True)
@@ -290,6 +353,7 @@ def plot():
     title = data.get("title", "Beeswarm Plot")
     xlabel = data.get("xlabel", "Category")
     ylabel = data.get("ylabel", "Value")
+    show_boxplot = _parse_bool(data.get("show_boxplot", False))
 
     if not categories or not values:
         return jsonify({"error": "categories and values are required"}), 400
@@ -302,7 +366,8 @@ def plot():
         return jsonify({"error": "values must be numeric"}), 400
 
     buf = generate_beeswarm(categories, values, title=title,
-                            xlabel=xlabel, ylabel=ylabel)
+                            xlabel=xlabel, ylabel=ylabel,
+                            show_boxplot=show_boxplot)
     return send_file(buf, mimetype="image/png")
 
 
@@ -326,6 +391,7 @@ def plot_csv():
     title = request.form.get("title", "Beeswarm Plot")
     xlabel = request.form.get("xlabel", df.columns[0])
     ylabel = request.form.get("ylabel", df.columns[1])
+    show_boxplot = _parse_bool(request.form.get("show_boxplot", False))
 
     cat_col = df.columns[0]
     val_col = df.columns[1]
@@ -337,7 +403,8 @@ def plot_csv():
         return jsonify({"error": f"Column '{val_col}' must be numeric"}), 400
 
     buf = generate_beeswarm(df[cat_col].tolist(), df[val_col].tolist(),
-                            title=title, xlabel=xlabel, ylabel=ylabel)
+                            title=title, xlabel=xlabel, ylabel=ylabel,
+                            show_boxplot=show_boxplot)
     return send_file(buf, mimetype="image/png")
 
 
@@ -355,9 +422,11 @@ def demo():
     title = request.args.get("title", "Beeswarm Demo")
     xlabel = request.args.get("xlabel", "Group")
     ylabel = request.args.get("ylabel", "Measurement")
+    show_boxplot = _parse_bool(request.args.get("show_boxplot", True), True)
 
     buf = generate_beeswarm(categories, values, title=title,
-                            xlabel=xlabel, ylabel=ylabel)
+                            xlabel=xlabel, ylabel=ylabel,
+                            show_boxplot=show_boxplot)
     return send_file(buf, mimetype="image/png")
 
 
