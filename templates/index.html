@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蜂群图生成器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1d1d1f;min-height:100vh}
+.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:32px 0;text-align:center}
+.header h1{font-size:28px;font-weight:700;letter-spacing:.5px}
+.header p{margin-top:8px;font-size:15px;opacity:.85}
+.container{max-width:960px;margin:0 auto;padding:32px 16px}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;margin-bottom:24px}
+.card h2{font-size:18px;font-weight:600;margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.tabs{display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid #e5e5e5}
+.tab{padding:10px 20px;cursor:pointer;font-size:14px;font-weight:500;color:#666;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
+.tab.active{color:#667eea;border-bottom-color:#667eea}
+.tab:hover{color:#667eea}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:#444;margin-bottom:6px}
+.form-group input,.form-group textarea{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;transition:border-color .2s}
+.form-group input:focus,.form-group textarea:focus{outline:none;border-color:#667eea;box-shadow:0 0 0 3px rgba(102,126,234,.15)}
+.form-group textarea{font-family:"SF Mono",Monaco,Consolas,monospace;resize:vertical;min-height:140px}
+.form-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 24px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px);box-shadow:0 4px 12px rgba(102,126,234,.4)}
+.btn-secondary{background:#f3f4f6;color:#444}
+.btn-secondary:hover{background:#e5e7eb}
+.btn-demo{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff}
+.btn-demo:hover{opacity:.9;transform:translateY(-1px)}
+.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+.file-zone{border:2px dashed #d1d5db;border-radius:10px;padding:32px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.file-zone:hover{border-color:#667eea;background:rgba(102,126,234,.03)}
+.file-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.file-zone .icon{font-size:36px;color:#667eea;margin-bottom:8px}
+.file-zone .text{font-size:14px;color:#666}
+.file-zone .hint{font-size:12px;color:#999;margin-top:4px}
+.result-area{text-align:center;min-height:200px;display:flex;align-items:center;justify-content:center;flex-direction:column}
+.result-area img{max-width:100%;border-radius:8px;box-shadow:0 2px 16px rgba(0,0,0,.1)}
+.result-area .placeholder{color:#aaa;font-size:15px}
+.loading{display:none;align-items:center;gap:8px;color:#667eea;font-size:14px}
+.loading.show{display:flex}
+.spinner{width:18px;height:18px;border:2px solid #e0e0e0;border-top-color:#667eea;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-msg{color:#dc2626;font-size:13px;margin-top:8px;padding:8px 12px;background:#fef2f2;border-radius:6px;display:none}
+.error-msg.show{display:block}
+.hint-text{font-size:12px;color:#999;margin-top:4px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🐝 蜂群图生成器</h1>
+  <p>上传分类数据与数值，一键生成蜂群图，对比多组数据的分布形态</p>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2>📝 数据输入</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="manual">手动输入</div>
+      <div class="tab" data-tab="csv">上传 CSV</div>
+    </div>
+
+    <div id="panel-manual">
+      <div class="form-group">
+        <label>数据（每行格式：分类,数值）</label>
+        <textarea id="data-input" placeholder="A,12.5&#10;A,15.3&#10;A,18.1&#10;B,22.4&#10;B,25.0&#10;B,19.8&#10;C,30.1&#10;C,28.7&#10;C,35.2">A,12.5
+A,15.3
+A,18.1
+A,14.2
+A,20.5
+A,16.8
+A,13.9
+A,17.4
+B,22.4
+B,25.0
+B,19.8
+B,23.6
+B,28.1
+B,21.3
+B,24.7
+C,30.1
+C,28.7
+C,35.2
+C,32.5
+C,27.8
+C,33.9
+C,29.4
+C,31.6
+D,40.2
+D,38.5
+D,42.1
+D,36.8
+D,44.3
+D,39.7
+D,41.5</textarea>
+        <p class="hint-text">支持逗号、制表符、分号分隔</p>
+      </div>
+    </div>
+
+    <div id="panel-csv" style="display:none">
+      <div class="file-zone" id="drop-zone">
+        <div class="icon">📂</div>
+        <div class="text">点击或拖拽上传 CSV 文件</div>
+        <div class="hint">第一列为分类，第二列为数值</div>
+        <input type="file" id="csv-file" accept=".csv,.txt,.tsv">
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-top:16px">
+      <div class="form-group">
+        <label>图表标题</label>
+        <input type="text" id="chart-title" value="蜂群图 - 多组数据分布对比">
+      </div>
+      <div class="form-group">
+        <label>X 轴标签</label>
+        <input type="text" id="x-label" value="分类">
+      </div>
+      <div class="form-group">
+        <label>Y 轴标签</label>
+        <input type="text" id="y-label" value="数值">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-generate" onclick="generatePlot()">📊 生成蜂群图</button>
+      <button class="btn btn-demo" onclick="loadDemo()">🎯 加载示例</button>
+      <button class="btn btn-secondary" onclick="downloadPlot()">💾 下载图片</button>
+    </div>
+    <div class="error-msg" id="error-msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>📈 生成结果</h2>
+    <div class="result-area" id="result-area">
+      <div class="placeholder">请输入数据并点击「生成蜂群图」</div>
+    </div>
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <span>正在生成图表…</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const tabs = document.querySelectorAll('.tab');
+const panels = { manual: document.getElementById('panel-manual'), csv: document.getElementById('panel-csv') };
+
+tabs.forEach(t => {
+  t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    Object.values(panels).forEach(p => p.style.display = 'none');
+    panels[t.dataset.tab].style.display = 'block';
+  });
+});
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function hideError() {
+  document.getElementById('error-msg').classList.remove('show');
+}
+
+async function generatePlot() {
+  hideError();
+  const title = document.getElementById('chart-title').value;
+  const xlabel = document.getElementById('x-label').value;
+  const ylabel = document.getElementById('y-label').value;
+
+  const activeTab = document.querySelector('.tab.active').dataset.tab;
+
+  if (activeTab === 'csv') {
+    const fileInput = document.getElementById('csv-file');
+    if (!fileInput.files.length) {
+      showError('请先选择 CSV 文件');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('title', title);
+    formData.append('xlabel', xlabel);
+    formData.append('ylabel', ylabel);
+
+    document.getElementById('loading').classList.add('show');
+    document.getElementById('result-area').innerHTML = '<div class="placeholder">正在生成…</div>';
+
+    try {
+      const resp = await fetch('/api/plot/csv', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || '生成失败');
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      document.getElementById('result-area').innerHTML = `<img src="${url}" alt="Beeswarm Plot">`;
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      document.getElementById('loading').classList.remove('show');
+    }
+    return;
+  }
+
+  const raw = document.getElementById('data-input').value.trim();
+  if (!raw) {
+    showError('请输入数据');
+    return;
+  }
+
+  const categories = [];
+  const values = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/[,;\t]+/);
+    if (parts.length < 2) continue;
+    categories.push(parts[0].trim());
+    const v = parseFloat(parts[1].trim());
+    if (isNaN(v)) continue;
+    values.push(v);
+  }
+
+  if (!categories.length) {
+    showError('未能解析到有效数据，请检查格式');
+    return;
+  }
+
+  document.getElementById('loading').classList.add('show');
+  document.getElementById('result-area').innerHTML = '<div class="placeholder">正在生成…</div>';
+
+  try {
+    const resp = await fetch('/api/plot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categories, values, title, xlabel, ylabel })
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || '生成失败');
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    document.getElementById('result-area').innerHTML = `<img src="${url}" alt="Beeswarm Plot">`;
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    document.getElementById('loading').classList.remove('show');
+  }
+}
+
+async function loadDemo() {
+  hideError();
+  const title = document.getElementById('chart-title').value || '蜂群图 Demo';
+  const xlabel = document.getElementById('x-label').value || 'Group';
+  const ylabel = document.getElementById('y-label').value || 'Measurement';
+
+  document.getElementById('loading').classList.add('show');
+  document.getElementById('result-area').innerHTML = '<div class="placeholder">正在加载示例…</div>';
+
+  try {
+    const resp = await fetch(`/api/demo?title=${encodeURIComponent(title)}&xlabel=${encodeURIComponent(xlabel)}&ylabel=${encodeURIComponent(ylabel)}`);
+    if (!resp.ok) throw new Error('加载示例失败');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    document.getElementById('result-area').innerHTML = `<img src="${url}" alt="Beeswarm Demo">`;
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    document.getElementById('loading').classList.remove('show');
+  }
+}
+
+function downloadPlot() {
+  const img = document.querySelector('#result-area img');
+  if (!img) {
+    showError('请先生成图表');
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = img.src;
+  a.download = 'beeswarm_plot.png';
+  a.click();
+}
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#667eea'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#d1d5db'; });
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.style.borderColor = '#d1d5db';
+  const fileInput = document.getElementById('csv-file');
+  if (e.dataTransfer.files.length) {
+    fileInput.files = e.dataTransfer.files;
+    dropZone.querySelector('.text').textContent = e.dataTransfer.files[0].name;
+  }
+});
+document.getElementById('csv-file').addEventListener('change', function() {
+  if (this.files.length) {
+    dropZone.querySelector('.text').textContent = this.files[0].name;
+  }
+});
+</script>
+
+</body>
+</html>
