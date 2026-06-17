@@ -43,7 +43,39 @@ def _beeswarm_offsets(values, width=0.6):
     return offsets
 
 
-def _simple_beeswarm(values, width=0.6):
+def _compute_auto_width(values, n_points):
+    if n_points <= 1:
+        return 0.4
+    y = np.array(values, dtype=float)
+    y_range = y.max() - y.min()
+    if y_range == 0:
+        y_range = 1.0
+
+    points_per_unit = n_points / y_range if y_range > 0 else n_points
+    base_width = 0.4
+
+    if n_points <= 10:
+        width = base_width
+    elif n_points <= 30:
+        width = 0.6
+    elif n_points <= 60:
+        width = 0.8
+    elif n_points <= 100:
+        width = 1.1
+    elif n_points <= 200:
+        width = 1.5
+    else:
+        width = 2.0 + (n_points - 200) * 0.003
+
+    if points_per_unit > 50:
+        width *= 1.3
+    elif points_per_unit > 20:
+        width *= 1.1
+
+    return min(width, 3.5)
+
+
+def _simple_beeswarm(values, width=None):
     if len(values) == 0:
         return np.array([])
 
@@ -52,73 +84,163 @@ def _simple_beeswarm(values, width=0.6):
     sorted_idx = np.argsort(y)
     x_offsets = np.zeros(n)
 
-    placed_y = np.empty(0)
-    placed_x = np.empty(0)
+    if width is None:
+        width = _compute_auto_width(values, n)
 
     y_range = y.max() - y.min()
     if y_range == 0:
-        point_radius = 0.5
+        point_radius_y = 0.02
+        point_radius_x = width * 0.04
     else:
-        point_radius = y_range * 0.025
-        if point_radius < 0.1:
-            point_radius = 0.1
+        density_factor = n / y_range if y_range > 0 else n
+        base_radius_y = y_range * 0.012
+        point_radius_y = max(base_radius_y, y_range / max(n * 1.5, 10))
+        point_radius_x = width * 0.04
 
-    min_dist = point_radius * 2.0
+    min_dist_y = point_radius_y * 2.2
+    min_dist_x = point_radius_x * 2.2
 
-    n_candidates = min(80, max(30, n // 2 + 20))
+    placed_y = []
+    placed_x = []
 
     for idx in sorted_idx:
         yi = y[idx]
+
         best_x = 0.0
+        best_score = float("inf")
 
+        n_candidates = min(120, max(40, n * 2))
         candidates = np.linspace(-width / 2, width / 2, n_candidates)
-        candidates = np.concatenate([[0.0], candidates])
-        candidates = np.unique(candidates)
 
-        best_dist = -1.0
-        for candidate_x in candidates:
+        half_n = n_candidates // 2
+        order = np.concatenate([
+            [0],
+            np.arange(1, half_n + 1).repeat(2) * np.array([1, -1] * half_n)
+        ])
+        order = np.clip(order, -half_n, half_n)
+        ordered_candidates = []
+        seen = set()
+        for o in order:
+            idx_c = half_n + o
+            if 0 <= idx_c < n_candidates and idx_c not in seen:
+                ordered_candidates.append(candidates[idx_c])
+                seen.add(idx_c)
+        for c in candidates:
+            if c not in seen:
+                ordered_candidates.append(c)
+
+        for candidate_x in ordered_candidates:
             if len(placed_y) == 0:
                 best_x = candidate_x
+                best_score = 0
                 break
 
-            dx = candidate_x - placed_x
-            dy = yi - placed_y
-            dists = np.sqrt(dx * dx + dy * dy)
-            min_dist_to_others = dists.min()
+            py = np.array(placed_y)
+            px = np.array(placed_x)
 
-            if min_dist_to_others >= min_dist:
-                center_dist = abs(candidate_x)
-                if best_dist < 0 or center_dist < best_dist:
-                    best_dist = center_dist
+            dy = np.abs(yi - py)
+            dx = np.abs(candidate_x - px)
+
+            y_overlap = dy < min_dist_y
+            x_overlap = dx < min_dist_x
+            overlap_mask = y_overlap & x_overlap
+
+            if not np.any(overlap_mask):
+                dist_sq = dy * dy + dx * dx
+                closest = np.sqrt(dist_sq).min()
+                center_penalty = abs(candidate_x) * 0.01
+                score = -closest + center_penalty
+                if score < best_score:
+                    best_score = score
                     best_x = candidate_x
 
-        if best_dist < 0:
-            candidates_2 = np.linspace(-width / 2, width / 2, n_candidates * 2)
+        if best_score == float("inf"):
+            fine_candidates = np.linspace(-width / 2, width / 2, n_candidates * 2)
             best_overlap = float("inf")
-            for candidate_x in candidates_2:
-                dx = candidate_x - placed_x
-                dy = yi - placed_y
-                dists = np.sqrt(dx * dx + dy * dy)
-                overlap = np.sum(np.maximum(0, min_dist - dists))
-                if overlap < best_overlap:
-                    best_overlap = overlap
+            for candidate_x in fine_candidates:
+                py = np.array(placed_y)
+                px = np.array(placed_x)
+                dy = np.abs(yi - py)
+                dx = np.abs(candidate_x - px)
+                y_pen = np.maximum(0, min_dist_y - dy)
+                x_pen = np.maximum(0, min_dist_x - dx)
+                total_overlap = np.sum(y_pen * x_pen * 100 + y_pen + x_pen)
+                total_overlap += abs(candidate_x) * 0.001
+                if total_overlap < best_overlap:
+                    best_overlap = total_overlap
                     best_x = candidate_x
 
+        placed_y.append(yi)
+        placed_x.append(best_x)
         x_offsets[idx] = best_x
-        placed_y = np.append(placed_y, yi)
-        placed_x = np.append(placed_x, best_x)
+
+    x_arr = np.array(placed_x)
+    y_arr = np.array(placed_y)
+    for _ in range(3):
+        for i in range(len(x_arr)):
+            if i == 0:
+                continue
+            others_x = np.delete(x_arr, i)
+            others_y = np.delete(y_arr, i)
+            yi = y_arr[i]
+
+            dy = np.abs(yi - others_y)
+            dx = np.abs(x_arr[i] - others_x)
+            y_overlap = dy < min_dist_y
+            x_overlap = dx < min_dist_x
+
+            if np.any(y_overlap & x_overlap):
+                current_x = x_arr[i]
+                best_candidate = current_x
+                best_penalty = float("inf")
+
+                perturb = np.linspace(-width * 0.15, width * 0.15, 21)
+                for p in perturb:
+                    cx = current_x + p
+                    if abs(cx) > width / 2:
+                        continue
+                    dx2 = np.abs(cx - others_x)
+                    x_overlap2 = dx2 < min_dist_x
+                    overlap_mask2 = y_overlap & x_overlap2
+                    if np.any(overlap_mask2):
+                        y_pen = np.maximum(0, min_dist_y - dy[overlap_mask2])
+                        x_pen = np.maximum(0, min_dist_x - dx2[overlap_mask2])
+                        pen = np.sum(y_pen + x_pen) + abs(cx) * 0.001
+                    else:
+                        pen = abs(cx) * 0.001
+                    if pen < best_penalty:
+                        best_penalty = pen
+                        best_candidate = cx
+                x_arr[i] = best_candidate
+
+    for k, idx in enumerate(sorted_idx):
+        x_offsets[idx] = x_arr[k]
 
     return x_offsets
 
 
 def generate_beeswarm(categories, values, title="Beeswarm Plot",
                        xlabel="Category", ylabel="Value",
-                       palette=None, figsize=(10, 6), dpi=120):
+                       palette=None, figsize=None, dpi=120):
     df = pd.DataFrame({"category": categories, "value": values})
     groups = df.groupby("category", sort=True)
 
     cat_labels = list(groups.groups.keys())
     n_cats = len(cat_labels)
+    max_group_size = max([len(groups.get_group(c)) for c in cat_labels]) if cat_labels else 0
+
+    if figsize is None:
+        if n_cats <= 3:
+            base_w = 8
+        elif n_cats <= 6:
+            base_w = 10
+        else:
+            base_w = 12 + (n_cats - 6) * 0.6
+        if max_group_size > 150:
+            base_w *= 1.25
+        elif max_group_size > 80:
+            base_w *= 1.1
+        figsize = (base_w, 6)
 
     if palette is None:
         cmap = plt.cm.Set2
@@ -131,7 +253,7 @@ def generate_beeswarm(categories, values, title="Beeswarm Plot",
         y_vals = grp["value"].values
         x_center = i
 
-        x_jitter = _simple_beeswarm(y_vals, width=0.7)
+        x_jitter = _simple_beeswarm(y_vals)
         x_positions = x_center + x_jitter
 
         ax.scatter(x_positions, y_vals, c=[palette[i % len(palette)]],
